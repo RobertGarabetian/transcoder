@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"transcoder/internal/ffmpeg"
 	"transcoder/internal/storage"
 )
 
@@ -80,9 +81,25 @@ func main() {
 			return
 		}
 
-		_ = os.Remove(tmpPath)
+		processedPath := "./processed/" + header.Filename
+		err = ffmpeg.Transcode720p(tmpPath, processedPath)
+		if err != nil {
+			log.Println("ffmpeg error:", err)
+			http.Error(w, "failed to transcode video", http.StatusInternalServerError)
+		}
 
-		fmt.Fprintf(w, "✅ File uploaded to bucket as %s", key)
+		processedKey := "processed/" + header.Filename
+		err = s3Client.UploadFile(ctx, processedKey, processedPath)
+		if err != nil {
+			log.Println("s3 upload processed error: ", err)
+			http.Error(w, "Error uploading transcoded file to s3", http.StatusInternalServerError)
+			return
+		}
+
+		_ = os.Remove(tmpPath)
+		_ = os.Remove(processedPath)
+
+		fmt.Fprintf(w, "✅ Raw file: raw/%s\n✅ Transcoded file: %s\n", header.Filename, processedKey)
 	}
 
 	// 3. Wire routes
