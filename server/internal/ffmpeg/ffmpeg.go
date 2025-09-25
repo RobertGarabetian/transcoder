@@ -9,7 +9,9 @@ import (
 func Transcode720p(inPath string, outPath string) error {
 	cmd := exec.Command("ffmpeg",
 		"-i", inPath,
-		"-vf", "scale=1:720",
+		"-map", "0:v:0",
+		"-map", "0:a:0",
+		"-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
 		"-c:v", "libx264",
 		"-crf", "23",
 		"-preset", "fast",
