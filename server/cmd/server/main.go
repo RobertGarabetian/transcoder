@@ -82,7 +82,7 @@ func main() {
 		}
 
 		processedPath := "./processed/" + header.Filename
-		err = ffmpeg.Transcode720p(tmpPath, processedPath)
+		err = ffmpeg.Transcode720p(tmpPath, header.Filename)
 		if err != nil {
 			log.Println("ffmpeg error:", err)
 			http.Error(w, "failed to transcode video", http.StatusInternalServerError)
