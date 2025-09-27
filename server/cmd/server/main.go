@@ -81,25 +81,31 @@ func main() {
 			return
 		}
 
-		processedPath := "./processed/" + header.Filename
-		err = ffmpeg.Transcode720p(tmpPath, header.Filename)
-		if err != nil {
-			log.Println("ffmpeg error:", err)
-			http.Error(w, "failed to transcode video", http.StatusInternalServerError)
+		var outputs []ffmpeg.Variant = []ffmpeg.Variant{
+			{Name: "1080p", Scale: "scale=-2:1080", CRF: 23, Preset: "fast"},
+			{Name: "720p", Scale: "scale=-2:720", CRF: 23, Preset: "fast"},
+			{Name: "490p", Scale: "scale=-2:480", CRF: 23, Preset: "fast"},
+		}
+		for _, o := range outputs {
+			name := o.Name + header.Filename
+			processedPath := "./processed/" + name
+			err = ffmpeg.Transcode720p(tmpPath, name, o.Preset, o.CRF, o.Scale, processedPath)
+			if err != nil {
+				log.Println("ffmpeg error:", err)
+				http.Error(w, "failed to transcode video", http.StatusInternalServerError)
+			}
+
+			processedKey := "processed/" + name
+			err = s3Client.UploadFile(ctx, processedKey, processedPath)
+			if err != nil {
+				log.Println("s3 upload processed error: ", err)
+				http.Error(w, "Error uploading transcoded file to s3", http.StatusInternalServerError)
+				return
+			}
+
 		}
 
-		processedKey := "processed/" + header.Filename
-		err = s3Client.UploadFile(ctx, processedKey, processedPath)
-		if err != nil {
-			log.Println("s3 upload processed error: ", err)
-			http.Error(w, "Error uploading transcoded file to s3", http.StatusInternalServerError)
-			return
-		}
-
-		_ = os.Remove(tmpPath)
-		_ = os.Remove(processedPath)
-
-		fmt.Fprintf(w, "✅ Raw file: raw/%s\n✅ Transcoded file: %s\n", header.Filename, processedKey)
+		fmt.Fprintf(w, "✅ Raw file: raw/%s\n✅ ", header.Filename)
 	}
 
 	// 3. Wire routes
