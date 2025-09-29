@@ -29,11 +29,7 @@ func withCORS(next http.Handler) http.Handler {
 
 func main() {
 	// 1. Initialize S3 client (MinIO)
-	s3Client, err := storage.NewS3Client(
-		"http://localhost:9000", // MinIO API endpoint
-
-		"videos", // bucket name you created in MinIO
-	)
+	s3Client, err := storage.NewS3Client(context.Background(), "transcoder.project")
 	if err != nil {
 		log.Fatal("failed to init S3 client:", err)
 	}
