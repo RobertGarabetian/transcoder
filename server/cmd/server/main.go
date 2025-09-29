@@ -31,10 +31,8 @@ func main() {
 	// 1. Initialize S3 client (MinIO)
 	s3Client, err := storage.NewS3Client(
 		"http://localhost:9000", // MinIO API endpoint
-		"us-east-1",             // fake region, MinIO just needs *something*
-		"admin",                 // access key
-		"admin123",              // secret key
-		"videos",                // bucket name you created in MinIO
+
+		"videos", // bucket name you created in MinIO
 	)
 	if err != nil {
 		log.Fatal("failed to init S3 client:", err)

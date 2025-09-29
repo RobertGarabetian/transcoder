@@ -3,12 +3,14 @@ package storage
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/joho/godotenv"
 )
 
 type S3Client struct {
@@ -16,7 +18,15 @@ type S3Client struct {
 	bucket string
 }
 
-func NewS3Client(endpoint, region, accessKey, secretKey, bucket string) (*S3Client, error) {
+func NewS3Client(endpoint, bucket string) (*S3Client, error) {
+	err := godotenv.Load()
+	if err != nil {
+		log.Fatal("Problem with loading env")
+	}
+	accessKey := os.Getenv("aws_access_key_id")
+	secretKey := os.Getenv("aws_secret_access_key")
+	region := "US West (Oregon) us-west-2"
+
 	cfg, err := config.LoadDefaultConfig(context.TODO(),
 		config.WithRegion(region),
 		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(
