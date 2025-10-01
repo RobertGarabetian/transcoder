@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 	"transcoder/internal/ffmpeg"
 	"transcoder/internal/storage"
@@ -70,8 +71,9 @@ func main() {
 			return
 		}
 
-		// Upload raw file to S3
 		ctx := context.Background()
+
+		// Upload raw file to S3
 		rawKey := "raw/" + header.Filename
 		err = s3Client.UploadFile(ctx, rawKey, tmpPath)
 		if err != nil {
@@ -80,8 +82,7 @@ func main() {
 			return
 		}
 
-		// Create processed output dir
-		// Create processed output dir
+		// Create processed output dir (local)
 		processedDir := "./processed/" + header.Filename
 		err = os.MkdirAll(processedDir, 0755)
 		if err != nil {
@@ -98,16 +99,14 @@ func main() {
 			return
 		}
 
-		// Upload all generated files (master.m3u8, stream_X.m3u8, .ts segments) to S3
+		// Upload all generated files (master.m3u8, variants, segments) to S3
 		err = filepath.Walk(processedDir, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
 				return err
 			}
 			if !info.IsDir() {
-				// Key in S3: processed/<videoName>/<filename>
 				relPath := filepath.Base(path)
 				processedKey := fmt.Sprintf("processed/%s/%s", header.Filename, relPath)
-
 				err = s3Client.UploadFile(ctx, processedKey, path)
 				if err != nil {
 					return fmt.Errorf("failed to upload %s: %w", path, err)
@@ -121,15 +120,51 @@ func main() {
 			return
 		}
 
-		// Return the S3 key for the master playlist
-		masterKey := fmt.Sprintf("processed/%s/master.m3u8", header.Filename)
-		signedURL, err := s3Client.GenerateSignedURL(context.Background(), masterKey, 15*time.Minute)
+		// 🔥 Rewrite master.m3u8 to include signed URLs for .ts files
+		masterPath := filepath.Join(processedDir, "master.m3u8")
+		content, err := os.ReadFile(masterPath)
 		if err != nil {
-			log.Println("signed url error:", err)
-			http.Error(w, "failed to sign url", http.StatusInternalServerError)
+			log.Println("read master.m3u8 error:", err)
+			http.Error(w, "failed to read master playlist", http.StatusInternalServerError)
 			return
 		}
 
+		lines := strings.Split(string(content), "\n")
+		for i, line := range lines {
+			if strings.HasSuffix(line, ".ts") {
+				tsKey := fmt.Sprintf("processed/%s/%s", header.Filename, line)
+				signed, err := s3Client.GenerateSignedURL(ctx, tsKey, 15*time.Minute)
+				if err != nil {
+					log.Println("signed ts url error:", err)
+					http.Error(w, "failed to sign segment url", http.StatusInternalServerError)
+					return
+				}
+				lines[i] = signed
+			}
+		}
+
+		newContent := strings.Join(lines, "\n")
+		signedMasterPath := filepath.Join(processedDir, "master_signed.m3u8")
+		os.WriteFile(signedMasterPath, []byte(newContent), 0644)
+
+		// Upload rewritten playlist to S3
+		signedMasterKey := fmt.Sprintf("processed/%s/master_signed.m3u8", header.Filename)
+		err = s3Client.UploadFile(ctx, signedMasterKey, signedMasterPath)
+		if err != nil {
+			log.Println("upload signed master error:", err)
+			http.Error(w, "failed to upload signed playlist", http.StatusInternalServerError)
+			return
+		}
+
+		// Generate signed URL for the new playlist
+		signedURL, err := s3Client.GenerateSignedURL(ctx, signedMasterKey, 15*time.Minute)
+		if err != nil {
+			log.Println("signed url error:", err)
+			http.Error(w, "failed to sign playlist url", http.StatusInternalServerError)
+			return
+		}
+
+		// ✅ Respond back to frontend
 		resp := map[string]string{
 			"raw":    rawKey,
 			"master": signedURL,
@@ -137,6 +172,7 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(resp)
 	}
+
 	videoHandler := func(w http.ResponseWriter, r *http.Request) {
 		url, err := s3Client.GenerateSignedURL(context.Background(), "processed/720pzzzz.MOV", 15*time.Minute)
 		if err != nil {

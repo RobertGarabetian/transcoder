@@ -1,0 +1,8 @@
+#EXTM3U
+#EXT-X-VERSION:3
+#EXT-X-TARGETDURATION:4
+#EXT-X-MEDIA-SEQUENCE:0
+#EXT-X-PLAYLIST-TYPE:VOD
+#EXTINF:4.439244,
+https://s3.us-west-2.amazonaws.com/transcoder.project/processed/zzzz.MOV/720p_000.ts?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Checksum-Mode=ENABLED&X-Amz-Credential=AKIA47CRZ2UAEI7S66LO%2F20251001%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251001T234719Z&X-Amz-Expires=900&X-Amz-SignedHeaders=host&x-id=GetObject&X-Amz-Signature=643b43a008a3e3eb9e27c9565c2d54dc3ac1be1db79fe16e1fb60ecfcbe6ebc7
+#EXT-X-ENDLIST
