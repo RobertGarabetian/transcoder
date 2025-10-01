@@ -2,11 +2,14 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
+	"time"
 	"transcoder/internal/ffmpeg"
 	"transcoder/internal/storage"
 )
@@ -36,7 +39,7 @@ func main() {
 
 	// 2. Define upload handler
 	uploadHandler := func(w http.ResponseWriter, r *http.Request) {
-		err := r.ParseMultipartForm(10 << 20)
+		err := r.ParseMultipartForm(10 << 20) // 10 MB max memory
 		if err != nil {
 			log.Println("parse error:", err)
 			http.Error(w, "failed to parse form", http.StatusBadRequest)
@@ -51,6 +54,7 @@ func main() {
 		}
 		defer file.Close()
 
+		// Save temp copy locally
 		tmpPath := "./" + header.Filename
 		dst, err := os.Create(tmpPath)
 		if err != nil {
@@ -66,45 +70,89 @@ func main() {
 			return
 		}
 
+		// Upload raw file to S3
 		ctx := context.Background()
-		key := "raw/" + header.Filename
-		err = s3Client.UploadFile(ctx, key, tmpPath)
+		rawKey := "raw/" + header.Filename
+		err = s3Client.UploadFile(ctx, rawKey, tmpPath)
 		if err != nil {
-			log.Println("s3 upload error:", err) // 👈 important
-			http.Error(w, "failed to upload to bucket", http.StatusInternalServerError)
+			log.Println("s3 upload error:", err)
+			http.Error(w, "failed to upload raw file", http.StatusInternalServerError)
 			return
 		}
 
-		var outputs []ffmpeg.Variant = []ffmpeg.Variant{
-			{Name: "1080p", Scale: "scale=-2:1080", CRF: 23, Preset: "fast"},
-			{Name: "720p", Scale: "scale=-2:720", CRF: 23, Preset: "fast"},
-			{Name: "490p", Scale: "scale=-2:480", CRF: 23, Preset: "fast"},
-		}
-		for _, o := range outputs {
-			name := o.Name + header.Filename
-			processedPath := "./processed/" + name
-			err = ffmpeg.Transcode720p(tmpPath, name, o.Preset, o.CRF, o.Scale, processedPath)
-			if err != nil {
-				log.Println("ffmpeg error:", err)
-				http.Error(w, "failed to transcode video", http.StatusInternalServerError)
-			}
-
-			processedKey := "processed/" + name
-			err = s3Client.UploadFile(ctx, processedKey, processedPath)
-			if err != nil {
-				log.Println("s3 upload processed error: ", err)
-				http.Error(w, "Error uploading transcoded file to s3", http.StatusInternalServerError)
-				return
-			}
-
+		// Create processed output dir
+		// Create processed output dir
+		processedDir := "./processed/" + header.Filename
+		err = os.MkdirAll(processedDir, 0755)
+		if err != nil {
+			log.Println("mkdir error:", err)
+			http.Error(w, "failed to create processed dir", http.StatusInternalServerError)
+			return
 		}
 
-		fmt.Fprintf(w, "✅ Raw file: raw/%s\n✅ ", header.Filename)
+		// Run FFmpeg HLS transcode
+		err = ffmpeg.TranscodeHLS(tmpPath, processedDir)
+		if err != nil {
+			log.Println("ffmpeg error:", err)
+			http.Error(w, "failed to transcode video", http.StatusInternalServerError)
+			return
+		}
+
+		// Upload all generated files (master.m3u8, stream_X.m3u8, .ts segments) to S3
+		err = filepath.Walk(processedDir, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			if !info.IsDir() {
+				// Key in S3: processed/<videoName>/<filename>
+				relPath := filepath.Base(path)
+				processedKey := fmt.Sprintf("processed/%s/%s", header.Filename, relPath)
+
+				err = s3Client.UploadFile(ctx, processedKey, path)
+				if err != nil {
+					return fmt.Errorf("failed to upload %s: %w", path, err)
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			log.Println("s3 upload processed error:", err)
+			http.Error(w, "failed to upload processed files", http.StatusInternalServerError)
+			return
+		}
+
+		// Return the S3 key for the master playlist
+		masterKey := fmt.Sprintf("processed/%s/master.m3u8", header.Filename)
+		signedURL, err := s3Client.GenerateSignedURL(context.Background(), masterKey, 15*time.Minute)
+		if err != nil {
+			log.Println("signed url error:", err)
+			http.Error(w, "failed to sign url", http.StatusInternalServerError)
+			return
+		}
+
+		resp := map[string]string{
+			"raw":    rawKey,
+			"master": signedURL,
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
 	}
-
-	// 3. Wire routes
+	videoHandler := func(w http.ResponseWriter, r *http.Request) {
+		url, err := s3Client.GenerateSignedURL(context.Background(), "processed/720pzzzz.MOV", 15*time.Minute)
+		if err != nil {
+			http.Error(w, "failed to generate signed URL", http.StatusInternalServerError)
+			return
+		}
+		resp := map[string]string{
+			"url": url}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+		fmt.Println(w, url)
+	}
+	//3. Wire routes
 	mux := http.NewServeMux()
 	mux.HandleFunc("/upload", uploadHandler)
+	mux.HandleFunc("/video", videoHandler)
 
 	// 4. Start server
 	log.Println("Server running at http://localhost:8080")
