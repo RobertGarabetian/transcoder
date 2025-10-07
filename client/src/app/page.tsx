@@ -73,10 +73,13 @@ export default function Home() {
         });
       }, 200);
 
-      const res = await fetch(`http://${process.env.BACKEND_URL}:8080/upload`, {
-        method: "POST",
-        body: formData,
-      });
+      const res = await fetch(
+        `https://${process.env.BACKEND_URL}:8080/upload`,
+        {
+          method: "POST",
+          body: formData,
+        }
+      );
       const data = await res.json();
       setVideoUrl(data.master);
       clearInterval(progressInterval);
