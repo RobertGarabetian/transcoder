@@ -17,6 +17,7 @@ export default function Home() {
   const [overallStatus, setOverallStatus] = useState("");
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
   const [transcodingProgress, setTranscodingProgress] = useState<
     TranscodingProgress[]
@@ -73,13 +74,10 @@ export default function Home() {
         });
       }, 200);
 
-      const res = await fetch(
-        `https://${process.env.BACKEND_URL}:8080/upload`,
-        {
-          method: "POST",
-          body: formData,
-        }
-      );
+      const res = await fetch(`${API_URL}/upload`, {
+        method: "POST",
+        body: formData,
+      });
       const data = await res.json();
       setVideoUrl(data.master);
       clearInterval(progressInterval);
