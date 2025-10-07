@@ -13,8 +13,6 @@ import (
 	"time"
 	"transcoder/internal/ffmpeg"
 	"transcoder/internal/storage"
-
-	"github.com/joho/godotenv"
 )
 
 func withCORS(next http.Handler) http.Handler {
@@ -33,7 +31,7 @@ func withCORS(next http.Handler) http.Handler {
 }
 
 func main() {
-	err := godotenv.Load()
+
 	s3Client, err := storage.NewS3Client(context.Background(), "transcoder.project")
 	if err != nil {
 		log.Fatal("failed to init S3 client:", err)
@@ -196,7 +194,7 @@ func main() {
 	// mux.HandleFunc("/video", videoHandler)
 
 	// 4. Start server
-	log.Printf("Server running at http://%s:8080", os.Getenv("BACKEND_URL"))
+	log.Printf("Server running at")
 	if err := http.ListenAndServe(":8080", withCORS(mux)); err != nil {
 		log.Fatal(err)
 	}
