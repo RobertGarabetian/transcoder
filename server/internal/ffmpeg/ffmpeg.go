@@ -7,14 +7,7 @@ import (
 	"path/filepath"
 )
 
-// TranscodeHLS takes an input video and outputs an HLS playlist + .ts segments
-// into the given output directory. Example:
-//
-//	./processed/zzzz/master.m3u8
-//	./processed/zzzz/720p_001.ts
-//	./processed/zzzz/720p_002.ts
 func TranscodeHLS(inPath string, outDir string) error {
-	// Ensure output paths
 	playlist := filepath.Join(outDir, "master.m3u8")
 	segments := filepath.Join(outDir, "720p_%03d.ts")
 

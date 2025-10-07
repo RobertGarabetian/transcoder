@@ -13,9 +13,10 @@ import (
 	"time"
 	"transcoder/internal/ffmpeg"
 	"transcoder/internal/storage"
+
+	"github.com/joho/godotenv"
 )
 
-// CORS middleware so frontend (localhost:3000) can call backend (localhost:8080)
 func withCORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -32,13 +33,12 @@ func withCORS(next http.Handler) http.Handler {
 }
 
 func main() {
-	// 1. Initialize S3 client (MinIO)
+	err := godotenv.Load()
 	s3Client, err := storage.NewS3Client(context.Background(), "transcoder.project")
 	if err != nil {
 		log.Fatal("failed to init S3 client:", err)
 	}
 
-	// 2. Define upload handler
 	uploadHandler := func(w http.ResponseWriter, r *http.Request) {
 		err := r.ParseMultipartForm(10 << 20) // 10 MB max memory
 		if err != nil {
@@ -120,7 +120,7 @@ func main() {
 			return
 		}
 
-		// 🔥 Rewrite master.m3u8 to include signed URLs for .ts files
+		//Rewrite master.m3u8 to include signed URLs for .ts files
 		masterPath := filepath.Join(processedDir, "master.m3u8")
 		content, err := os.ReadFile(masterPath)
 		if err != nil {
@@ -164,34 +164,39 @@ func main() {
 			return
 		}
 
-		// ✅ Respond back to frontend
+		// Respond back to frontend
 		resp := map[string]string{
 			"raw":    rawKey,
 			"master": signedURL,
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(resp)
+		go func() {
+			os.Remove(tmpPath)
+			os.RemoveAll(processedDir)
+		}()
+
 	}
 
-	videoHandler := func(w http.ResponseWriter, r *http.Request) {
-		url, err := s3Client.GenerateSignedURL(context.Background(), "processed/720pzzzz.MOV", 15*time.Minute)
-		if err != nil {
-			http.Error(w, "failed to generate signed URL", http.StatusInternalServerError)
-			return
-		}
-		resp := map[string]string{
-			"url": url}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
-		fmt.Println(w, url)
-	}
+	// videoHandler := func(w http.ResponseWriter, r *http.Request) {
+	// 	url, err := s3Client.GenerateSignedURL(context.Background(), "processed/720pzzzz.MOV", 15*time.Minute)
+	// 	if err != nil {
+	// 		http.Error(w, "failed to generate signed URL", http.StatusInternalServerError)
+	// 		return
+	// 	}
+	// 	resp := map[string]string{
+	// 		"url": url}
+	// 	w.Header().Set("Content-Type", "application/json")
+	// 	json.NewEncoder(w).Encode(resp)
+	// 	fmt.Println(w, url)
+	// }
 	//3. Wire routes
 	mux := http.NewServeMux()
 	mux.HandleFunc("/upload", uploadHandler)
-	mux.HandleFunc("/video", videoHandler)
+	// mux.HandleFunc("/video", videoHandler)
 
 	// 4. Start server
-	log.Println("Server running at http://localhost:8080")
+	log.Printf("Server running at http://%s:8080", os.Getenv("BACKEND_URL"))
 	if err := http.ListenAndServe(":8080", withCORS(mux)); err != nil {
 		log.Fatal(err)
 	}

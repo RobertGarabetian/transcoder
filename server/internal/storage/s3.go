@@ -46,7 +46,7 @@ func (s *S3Client) UploadFile(ctx context.Context, key string, localPath string)
 		Bucket: aws.String(s.bucket),
 		Key:    aws.String(key),
 		Body:   f,
-		ACL:    types.ObjectCannedACLPrivate, // keep objects private, accessed only by signed URLs
+		ACL:    types.ObjectCannedACLPrivate,
 	})
 	if err != nil {
 		return err
