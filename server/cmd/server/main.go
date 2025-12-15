@@ -37,6 +37,28 @@ func main() {
 		log.Fatal("failed to init S3 client:", err)
 	}
 
+	go func() {
+		ticker := time.NewTicker(2 * time.Hour)
+		defer ticker.Stop()
+
+	
+
+		log.Println("S3 auto-cleanup goroutine started. Will delete all files every 2 hours.")
+
+		for {
+			select {
+			case <-ticker.C:
+				ctx := context.Background()
+				log.Println("Starting scheduled S3 bucket cleanup...")
+				if err := s3Client.DeleteAllObjects(ctx); err != nil {
+					log.Printf("Error during scheduled cleanup: %v", err)
+				} else {
+					log.Println("Scheduled cleanup completed successfully")
+				}
+			}
+		}
+	}()
+
 	uploadHandler := func(w http.ResponseWriter, r *http.Request) {
 		err := r.ParseMultipartForm(10 << 20) // 10 MB max memory
 		if err != nil {
@@ -80,7 +102,6 @@ func main() {
 			return
 		}
 
-		// Create processed output dir (local)
 		processedDir := "./processed/" + header.Filename
 		err = os.MkdirAll(processedDir, 0755)
 		if err != nil {
@@ -89,7 +110,7 @@ func main() {
 			return
 		}
 
-		// Run FFmpeg HLS transcode
+		// HLS transcode
 		err = ffmpeg.TranscodeHLS(tmpPath, processedDir)
 		if err != nil {
 			log.Println("ffmpeg error:", err)
@@ -97,7 +118,6 @@ func main() {
 			return
 		}
 
-		// Upload all generated files (master.m3u8, variants, segments) to S3
 		err = filepath.Walk(processedDir, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
 				return err
@@ -176,21 +196,66 @@ func main() {
 
 	}
 
-	// videoHandler := func(w http.ResponseWriter, r *http.Request) {
-	// 	url, err := s3Client.GenerateSignedURL(context.Background(), "processed/720pzzzz.MOV", 15*time.Minute)
-	// 	if err != nil {
-	// 		http.Error(w, "failed to generate signed URL", http.StatusInternalServerError)
-	// 		return
-	// 	}
-	// 	resp := map[string]string{
-	// 		"url": url}
-	// 	w.Header().Set("Content-Type", "application/json")
-	// 	json.NewEncoder(w).Encode(resp)
-	// 	fmt.Println(w, url)
-	// }
-	//3. Wire routes
+	// Test endpoint: List all objects in S3 bucket
+	listHandler := func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		ctx := context.Background()
+		keys, err := s3Client.ListObjects(ctx)
+		if err != nil {
+			log.Printf("Error listing objects: %v", err)
+			http.Error(w, "failed to list objects", http.StatusInternalServerError)
+			return
+		}
+
+		resp := map[string]interface{}{
+			"count":  len(keys),
+			"objects": keys,
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}
+
+	// Test endpoint: Manually trigger cleanup
+	cleanupHandler := func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		ctx := context.Background()
+		log.Println("Manual cleanup triggered via /cleanup endpoint")
+		
+		// List objects before deletion
+		keysBefore, _ := s3Client.ListObjects(ctx)
+		
+		err := s3Client.DeleteAllObjects(ctx)
+		if err != nil {
+			log.Printf("Error during manual cleanup: %v", err)
+			http.Error(w, fmt.Sprintf("cleanup failed: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		// List objects after deletion
+		keysAfter, _ := s3Client.ListObjects(ctx)
+
+		resp := map[string]interface{}{
+			"status":      "success",
+			"deleted":     len(keysBefore),
+			"remaining":   len(keysAfter),
+			"message":     fmt.Sprintf("Deleted %d objects", len(keysBefore)),
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/upload", uploadHandler)
+	mux.HandleFunc("/list", listHandler)      // GET /list - List all objects
+	mux.HandleFunc("/cleanup", cleanupHandler) // POST /cleanup - Manually trigger cleanup
 	// mux.HandleFunc("/video", videoHandler)
 
 	// 4. Start server
