@@ -9,3 +9,5 @@
 - FFmpeg
 - S3
 - http
+
+-- learning about transcoders
